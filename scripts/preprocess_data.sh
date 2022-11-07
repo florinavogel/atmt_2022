@@ -21,6 +21,8 @@ prepared=$raw_data/../prepared
 mkdir -p $preprocessed
 mkdir -p $prepared
 
+
+
 for lang in $src_lang $tgt_lang
     do
         echo "training truecase model for $lang"

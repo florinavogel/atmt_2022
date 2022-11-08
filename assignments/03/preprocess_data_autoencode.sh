@@ -13,7 +13,7 @@ data=$base/data/$tgt-$src/autoencoded/
 cd $base
 
 # auto-encode target language
-python scripts/autoencode.py --src $data/preprocessed/train.fr --tgt $data/preprocessed/train.en
+python scripts/autoencode.py --src $data/preprocessed/train.$src --tgt $data/preprocessed/train.$tgt
 
 # preprocess all files for model training
 python preprocess.py --target-lang $tgt --source-lang $src --dest-dir $data/prepared/ --train-prefix $data/preprocessed/train --valid-prefix $data/preprocessed/valid --test-prefix $data/preprocessed/test --tiny-train-prefix $data/preprocessed/tiny_train --threshold-src 1 --threshold-tgt 1 --num-words-src 4000 --num-words-tgt 4000

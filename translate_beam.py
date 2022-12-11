@@ -22,7 +22,8 @@ def get_args():
     # Add data arguments
     parser.add_argument('--data', default='assignments/03/prepared', help='path to data directory')
     parser.add_argument('--dicts', required=True, help='path to directory containing source and target dictionaries')
-    parser.add_argument('--checkpoint-path', default='checkpoints_asg4/checkpoint_best.pt', help='path to the model file')
+    parser.add_argument('--checkpoint-path', default='checkpoints_asg4/checkpoint_best.pt',
+                        help='path to the model file')
     parser.add_argument('--batch-size', default=None, type=int, help='maximum number of sentences in a batch')
     parser.add_argument('--output', default='model_translations.txt', type=str,
                         help='path to the output file destination')
@@ -30,10 +31,14 @@ def get_args():
 
     # Add beam search arguments
     parser.add_argument('--beam-size', default=5, type=int, help='number of hypotheses expanded in beam search')
-    # alpha hyperparameter for length normalization (described as lp in https://arxiv.org/pdf/1609.08144.pdf equation 14)
+    # alpha hyperparameter for length normalization (described as lp in https://arxiv.org/pdf/1609.08144.pdf equation
+    # 14)
     parser.add_argument('--alpha', default=0.0, type=float, help='alpha for softer length normalization')
     # Task 3
     parser.add_argument('--lmbda', default=0.0, type=float, help='lambda for the effect of the squared regularizer')
+    # Task 4
+    parser.add_argument('--n-best-size', default=1, type=int, help='number of n-best translations to be outputted')
+    parser.add_argument('--gamma', default=0.0, type=float, help='gamma parameter for diversity boosting')
 
     return parser.parse_args()
 
@@ -89,49 +94,49 @@ def main(args):
             if args.cuda:
                 go_slice = utils.move_to_cuda(go_slice)
 
-            #import pdb;pdb.set_trace()
-            
+            # import pdb;pdb.set_trace()
+
             # Compute the decoder output at the first time step
             decoder_out, _ = model.decoder(go_slice, encoder_out)
 
             # __QUESTION 2: Why do we keep one top candidate more than the beam size?
             log_probs, next_candidates = torch.topk(torch.log(torch.softmax(decoder_out, dim=2)),
-                                                    args.beam_size+1, dim=-1)
+                                                    args.beam_size + 1, dim=-1)
 
-        # Create number of beam_size beam search nodes for every input sentence
+        #  Create number of beam_size beam search nodes for every input sentence
         for i in range(batch_size):
             for j in range(args.beam_size):
                 best_candidate = next_candidates[i, :, j]
-                backoff_candidate = next_candidates[i, :, j+1]
+                backoff_candidate = next_candidates[i, :, j + 1]
                 best_log_p = log_probs[i, :, j]
-                backoff_log_p = log_probs[i, :, j+1]
+                backoff_log_p = log_probs[i, :, j + 1]
                 next_word = torch.where(best_candidate == tgt_dict.unk_idx, backoff_candidate, best_candidate)
                 log_p = torch.where(best_candidate == tgt_dict.unk_idx, backoff_log_p, best_log_p)
                 log_p = log_p[-1]
 
                 # Store the encoder_out information for the current input sentence and beam
-                emb = encoder_out['src_embeddings'][:,i,:]
-                lstm_out = encoder_out['src_out'][0][:,i,:]
-                final_hidden = encoder_out['src_out'][1][:,i,:]
-                final_cell = encoder_out['src_out'][2][:,i,:]
+                emb = encoder_out['src_embeddings'][:, i, :]
+                lstm_out = encoder_out['src_out'][0][:, i, :]
+                final_hidden = encoder_out['src_out'][1][:, i, :]
+                final_cell = encoder_out['src_out'][2][:, i, :]
                 try:
-                    mask = encoder_out['src_mask'][i,:]
+                    mask = encoder_out['src_mask'][i, :]
                 except TypeError:
                     mask = None
 
                 node = BeamSearchNode(searches[i], emb, lstm_out, final_hidden, final_cell,
-                                      mask, torch.cat((go_slice[i], next_word)), log_p, 1, log_p**2)
+                                      mask, torch.cat((go_slice[i], next_word)), log_p, 1, log_p ** 2, 0)
                 # __QUESTION 3: Why do we add the node with a negative score?
-                searches[i].add(-node.eval(args.alpha, args.lmbda), node)
+                searches[i].add(-node.eval(args.alpha, args.lmbda, args.gamma), node)
 
-        #import pdb;pdb.set_trace()
+        # import pdb;pdb.set_trace()
         # Start generating further tokens until max sentence length reached
-        for _ in range(args.max_len-1):
+        for _ in range(args.max_len - 1):
 
             # Get the current nodes to expand
             nodes = [n[1] for s in searches for n in s.get_current_beams()]
             if nodes == []:
-                break # All beams ended in EOS
+                break  # All beams ended in EOS
 
             # Reconstruct prev_words, encoder_out from current beam search nodes
             prev_words = torch.stack([node.sequence for node in nodes])
@@ -150,16 +155,17 @@ def main(args):
                 decoder_out, _ = model.decoder(prev_words, encoder_out)
 
             # see __QUESTION 2
-            log_probs, next_candidates = torch.topk(torch.log(torch.softmax(decoder_out, dim=2)), args.beam_size+1, dim=-1)
+            log_probs, next_candidates = torch.topk(torch.log(torch.softmax(decoder_out, dim=2)), args.beam_size + 1,
+                                                    dim=-1)
 
-            # Create number of beam_size next nodes for every current node
+            #  Create number of beam_size next nodes for every current node
             for i in range(log_probs.shape[0]):
                 for j in range(args.beam_size):
 
                     best_candidate = next_candidates[i, :, j]
-                    backoff_candidate = next_candidates[i, :, j+1]
+                    backoff_candidate = next_candidates[i, :, j + 1]
                     best_log_p = log_probs[i, :, j]
-                    backoff_log_p = log_probs[i, :, j+1]
+                    backoff_log_p = log_probs[i, :, j + 1]
                     next_word = torch.where(best_candidate == tgt_dict.unk_idx, backoff_candidate, best_candidate)
                     log_p = torch.where(best_candidate == tgt_dict.unk_idx, backoff_log_p, best_log_p)
                     log_p = log_p[-1]
@@ -177,19 +183,20 @@ def main(args):
                         node = BeamSearchNode(
                             search, node.emb, node.lstm_out, node.final_hidden,
                             node.final_cell, node.mask, torch.cat((prev_words[i][0].view([1]),
-                            next_word)), node.logp, node.length, node.sos_logp
-                            )
-                        search.add_final(-node.eval(args.alpha, args.lmbda), node)
+                                                                   next_word)), node.logp, node.length, node.sos_logp, 0
+                        )
+                        # TODO: Should we add 0 as rank when EOS is generated or not?
+                        search.add_final(-node.eval(args.alpha, args.lmbda, args.gamma), node)
 
                     # Add the node to current nodes for next iteration
                     else:
                         node = BeamSearchNode(
                             search, node.emb, node.lstm_out, node.final_hidden,
                             node.final_cell, node.mask, torch.cat((prev_words[i][0].view([1]),
-                            next_word)), node.logp + log_p, node.length + 1, node.sos_logp
-                            + log_p**2
-                            )
-                        search.add(-node.eval(args.alpha, args.lmbda), node)
+                                                                   next_word)), node.logp + log_p, node.length + 1,
+                                                                                node.sos_logp + log_p ** 2, j + 1
+                        )
+                        search.add(-node.eval(args.alpha, args.lmbda, args.gamma), node)
 
             # #import pdb;pdb.set_trace()
             # __QUESTION 5: What happens internally when we prune our beams?
@@ -198,9 +205,11 @@ def main(args):
                 search.prune()
 
         # Segment into sentences
-        best_sents = torch.stack([search.get_best()[1].sequence[1:].cpu() for search in searches])
+        _best_sents = [search.get_best(args.n_best_size) for search in searches]
+        best_sents = torch.stack(
+            [sentgroup[i][1].sequence[1:].cpu() for sentgroup in _best_sents for i in range(args.n_best_size)])
         decoded_batch = best_sents.numpy()
-        #import pdb;pdb.set_trace()
+        # import pdb;pdb.set_trace()
 
         output_sentences = [decoded_batch[row, :] for row in range(decoded_batch.shape[0])]
 
@@ -215,11 +224,14 @@ def main(args):
         output_sentences = temp
 
         # Convert arrays of indices into strings of words
-        output_sentences = [tgt_dict.string(sent) for sent in output_sentences]
+        _output_sentences = [tgt_dict.string(sent) for sent in output_sentences]
+        output_sentences = []
+
+        for j in range(0, len(_output_sentences), args.n_best_size):
+            output_sentences.append(" ;; ".join(_output_sentences[j:j + args.n_best_size]))
 
         for ii, sent in enumerate(output_sentences):
             all_hyps[int(sample['id'].data[ii])] = sent
-
 
     # Write to file
     if args.output is not None:

@@ -37,7 +37,7 @@ class BeamSearch(object):
             nodes.append((node[0], node[2]))
         return nodes
 
-    def get_best(self):
+    def get_best(self, n):
         """ Returns final node with the lowest negative log probability """
         # Merge EOS paths and those that were stopped by
         # max sequence length (still in nodes)
@@ -50,10 +50,13 @@ class BeamSearch(object):
             node = self.nodes.get()
             merged.put(node)
 
-        node = merged.get()
-        node = (node[0], node[2])
+        nodes = []
+        for i in range(n):
+            node = merged.get()
+            node = (node[0], node[2])
+            nodes.append(node)
 
-        return node
+        return nodes
 
     def prune(self):
         """ Removes all nodes but the beam_size best ones (lowest neg log prob) """
@@ -69,7 +72,7 @@ class BeamSearch(object):
 class BeamSearchNode(object):
     """ Defines a search node and stores values important for computation of beam search path"""
 
-    def __init__(self, search, emb, lstm_out, final_hidden, final_cell, mask, sequence, logProb, length, sos_logp):
+    def __init__(self, search, emb, lstm_out, final_hidden, final_cell, mask, sequence, logProb, length, sos_logp, rank):
         # Attributes needed for computation of decoder states
         self.sequence = sequence
         self.emb = emb
@@ -77,7 +80,10 @@ class BeamSearchNode(object):
         self.final_hidden = final_hidden
         self.final_cell = final_cell
         self.mask = mask
+        # Task 3
         self.sos_logp = sos_logp
+        # Task 4
+        self.rank = rank
 
         # Attributes needed for computation of sequence score
         self.logp = logProb
@@ -85,7 +91,7 @@ class BeamSearchNode(object):
 
         self.search = search
 
-    def eval(self, alpha=0.0, lmbda=0.0):
+    def eval(self, alpha=0.0, lmbda=0.0, gamma=0.0):
         """ Returns score of sequence up to this node 
 
         params: 
@@ -96,4 +102,4 @@ class BeamSearchNode(object):
         
         """
         normalizer = (5 + self.length) ** alpha / (5 + 1) ** alpha
-        return (self.logp - lmbda * self.sos_logp) / normalizer
+        return (self.logp - lmbda * self.sos_logp - gamma * self.rank) / normalizer
